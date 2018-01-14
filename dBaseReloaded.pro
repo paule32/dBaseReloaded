@@ -34,5 +34,4 @@ FORMS += \
         mainwindow.ui
 
 DISTFILES += \
-    test.code \
-    ../build-dBaseReloaded-Desktop_Qt_5_10_0_GCC_64bit-Debug/test.code
+    test.code

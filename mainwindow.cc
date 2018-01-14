@@ -1,3 +1,6 @@
+#include <cctype>
+using namespace std;
+
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
@@ -21,22 +24,57 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+// ------------------------------------------------------
+// class for error's in the source.
+// error's make a trap - how wonderful is "try catch" :-)
+// ------------------------------------------------------
 class dBaseError {
 public:
     dBaseError(QString message) : m_message(message) {}
     QString m_message;
 };
 
+// ------------------------------------------------------
+// "catch" newline feeds, and try to handle next line ...
+// ------------------------------------------------------
+class dBaseNewLine {public:
+      dBaseNewLine() {}  };
+
+class dBaseEndOfProgram {public:
+      dBaseEndOfProgram() {}  };
+      
 QFile * srcfile;
 QString buffer;
 int     char_pos= 0;
 int     line_no = 0;
+char  * buff_ = {0};
 
 QString ident;
 
 const int MAX_READ_LINE = 4096;     // maximum of read-in per line
 const int TOKEN_IDENT   = 1000;
 
+// internal context's (parser) ...
+// ---------------------------------
+int current_context             = 0; // default context
+int current_context_do          = 0; // keyword: do
+int current_context_newcommand  = 0; // mark for command processing
+
+QMap<QString,QVariant> MyParameters;
+
+
+static void inline check_buffer()
+{
+    if (char_pos-1 >= buffer.size())
+    throw new dBaseError(
+    QString("buffer overflow."));
+}
+
+static int get_char()
+{
+    check_buffer();
+    return buffer.at(char_pos++).toLatin1();
+}
 static int process_char(int ch)
 {
     int cflag = 0;
@@ -47,9 +85,7 @@ static int process_char(int ch)
     ||   (c == '_')) {
         ident.append(ch);
         while (1) {
-            if (char_pos >= buffer.size())
-            break;
-            c = buffer.at(char_pos++).toLatin1();
+            c = get_char();
             if (((c >= '0') && (c <= '9'))
             ||  ((c >= 'a') && (c <= 'z'))
             ||  ((c >= 'A') && (c <= 'Z'))
@@ -59,11 +95,90 @@ static int process_char(int ch)
             }
             else {
                 switch (c) {
+                case 10: {
+                    qDebug() << "as: " << ident;
+                    
+                    if (current_context_do == 2)
+                    {   qDebug() << "wuitt";
+                        ident.clear();
+                        while (1) {
+                            c = get_char();
+                            if (((c >= '0') && (c <= '9'))
+                            ||  ((c >= 'a') && (c <= 'z'))
+                            ||  ((c >= 'A') && (c <= 'Z'))
+                            ||   (c == '_') || (c == '.')) {
+                                ident.append(c);
+                                continue;
+                            }
+                            else if (c == 10) {
+                            qDebug() << "for22: " << ident;
+                                throw new dBaseNewLine;
+                                break;
+                            }
+                            else if (c == 32 || c == 9 || c == 7) {
+                                continue;
+                            }
+                            
+                            else if (c == ',') {
+                                qDebug() << "kommas: " << ident;
+                                ident.clear();
+                                continue;
+                            }
+                            
+                            current_context_do = 2;
+                            
+                            if (c == '&') process_char('&'); else
+                            if (c == '*') process_char('*'); else
+                            if (c == '/') process_char('/'); else {
+                                if (char_pos >= buffer.size())
+                                throw new dBaseEndOfProgram;
+                                
+                                else
+                                qDebug() << "1formser: " << ident;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    throw new dBaseNewLine;
+                }
+                break;
+                
                 case 32:
-                case 10:                
+                case  7:
                 case  9: {
                     if (ident.trimmed().size() > 0) {
+                        ident = ident.toLower();
                         qDebug() << "id: " << ident;
+                        if (ident == "do") {
+                            qDebug() << "ein dooer";
+                            current_context_do = 1;
+                            while (1) {
+                                c = get_char();
+                                if (((c >= '0') && (c <= '9'))
+                                ||  ((c >= 'a') && (c <= 'z'))
+                                ||  ((c >= 'A') && (c <= 'Z'))
+                                ||   (c == '_')) {
+                                    ident.append(c);
+                                    continue;
+                                }
+                                else if (c == 10) {
+                                    throw new dBaseNewLine;
+                                    break;
+                                }
+                                else if (c == 32 || c == 9 || c == 7) {
+                                    qDebug() << "Aformser: " << ident;
+                                    break;
+                                }
+                                
+                                else if (c == '&') goto and_goto;
+                                else if (c == '*') goto mul_goto;
+                                else if (c == '/') goto div_goto;
+                                
+                                else break;
+                            }
+                            qDebug() << "Bformser: " << ident;
+                        }
                         ident.clear();
                     }
                 }
@@ -94,9 +209,13 @@ static int process_char(int ch)
                     else if (c == '*') goto mul_goto;
                     else if (c == '/') goto div_goto;
                     
-                    else if (c ==  10) break;
+                    else if (c ==  10) throw new dBaseNewLine;
                     else if (c ==   9) break;
                     else if (c ==  32) break;
+                    
+                    else if (c == ',') {
+                        qDebug() << "nochn komma";
+                    }
                     
                     else {
                     throw new dBaseError(QString("PARAMETER syntax error."));
@@ -237,12 +356,24 @@ static int process_char(int ch)
     else if (c == '&') goto and_goto;
     else if (c == '*') goto mul_goto;
     else if (c == '/') goto div_goto;
-        
-/*    else if (c ==  10) break;
-    else if (c ==   9) break;
-    else if (c ==  32) break;*/
-        
+       
     return c;
+}
+
+// --------------------------------
+// reset variables for next run ...
+// --------------------------------
+void reset_program()
+{
+    srcfile->close();
+    line_no  = 0;
+    char_pos = 0;
+    
+    current_context = 0;
+    current_context_do = 0;
+    current_context_newcommand = 0;
+    
+    delete buff_;
 }
 
 void MainWindow::on_pushButton_clicked()
@@ -250,9 +381,10 @@ void MainWindow::on_pushButton_clicked()
     srcfile = new QFile(QString("%1/test.code")
     .arg(qApp->applicationDirPath()));
     srcfile->open(QIODevice::ReadOnly | QIODevice::Text);
+    srcfile->seek(0);
     
     int c;
-    char *buff_ = new char[MAX_READ_LINE];
+    buff_ = new char[MAX_READ_LINE];
     try {
         while (!srcfile->atEnd()) {
             srcfile->readLine(buff_,MAX_READ_LINE);
@@ -266,8 +398,46 @@ void MainWindow::on_pushButton_clicked()
                 ident.clear();
                 
                 while (1) {
+                try {
                     if (char_pos >= buffer.size())
                     break;
+                    
+                    if (current_context_do == 1) {
+                        while (1) {
+                            c = get_char();
+                            if (((c >= '0') && (c <= '9'))
+                            ||  ((c >= 'a') && (c <= 'z'))
+                            ||  ((c >= 'A') && (c <= 'Z'))
+                            ||   (c == '_')) {
+                                ident.append(c);
+                                continue;
+                            }
+                            else if (c == 10) {
+                                current_context_do = 2;
+                                c = get_char( );
+                                process_char(c);
+                                qDebug() << "for22: " << ident;
+                                throw new dBaseNewLine;
+                                break;
+                            }
+                            else if (c == 32 || c == 9 || c == 7) {
+                                current_context_do = 2;
+                                qDebug() << "Dformser: " << ident;
+                                ident.clear();
+                                break;
+                            }
+                            
+                            current_context_do = 2;
+                            
+                            if (c == '&') process_char('&'); else
+                            if (c == '*') process_char('*'); else
+                            if (c == '/') process_char('/'); else {
+                                qDebug() << "Cformser: " << ident;
+                                break;
+                            }
+                        }
+                        //current_context_do = 0;
+                    }
                     
                     c = buffer.at(char_pos++).toLatin1();
                     c = process_char(c);
@@ -285,6 +455,18 @@ void MainWindow::on_pushButton_clicked()
                         qDebug() << "ein e";
                     }
                 }
+                catch (dBaseEndOfProgram *e) {
+                    Q_UNUSED(e)
+                    QMessageBox::information(this,"Information",
+                    QString("End of Program.\nParsed lines: %1").arg(line_no));
+                    reset_program();
+                    return;
+                }
+                catch (dBaseNewLine *e) {
+                    Q_UNUSED(e)
+                    qDebug() << "new line: " << line_no;
+                    break;
+                }   }
             }
             else {
                 throw new dBaseError(QString("Syntax Error."));
@@ -293,13 +475,6 @@ void MainWindow::on_pushButton_clicked()
         
         QMessageBox::information(this,"Information",
         QString("parsed lines: %1").arg(line_no));
-        
-        // --------------------------------
-        // reset variables for next run ...
-        // --------------------------------
-        srcfile->close();
-        line_no  = 0;
-        char_pos = 0;
     }
     catch (dBaseError *e) {
         QMessageBox::critical(this,tr("Error"),
@@ -311,4 +486,9 @@ void MainWindow::on_pushButton_clicked()
     catch (...) {
         QMessageBox::critical(this,tr("Error"),tr("unknown error"));
     }
+    
+    // ---------------------
+    // reset for nex run ...
+    // ---------------------
+    reset_program();
 }
