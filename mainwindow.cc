@@ -42,322 +42,574 @@ class dBaseNewLine {public:
 
 class dBaseEndOfProgram {public:
       dBaseEndOfProgram() {}  };
-      
+
+class dBaseEndOfComment {public:
+      dBaseEndOfComment() {}  };
+
+enum op_enum {
+    NOP,
+    NUMBER_ASSIGN,
+    ADD_VAR,
+    ADD_NUMBER,
+    SUB_NUMBER,
+    MUL_NUMBER,
+    DIV_NUMBER
+};
+
+class MyCommand {
+public:
+    MyCommand() {}
+    QString name;
+    int type;
+    op_enum op;
+    QVariant value;
+};
+
+
+QVector<MyCommand*> exec_cmds;
+
+QByteArray buffer, ident_before;
+
+QString number_ident;
 QFile * srcfile;
-QString buffer;
 int     char_pos= 0;
 int     line_no = 0;
-char  * buff_ = {0};
 
 QString ident;
 
-const int MAX_READ_LINE = 4096;     // maximum of read-in per line
-const int TOKEN_IDENT   = 1000;
+const int MAX_READ_LINE   = 4096;     // maximum of read-in per line
+const int TOKEN_IDENT     = 1000;
+const int TOKEN_NUMBER    = 1001;
+const int TOKEN_DIVASSIGN = 1002;
 
-// internal context's (parser) ...
-// ---------------------------------
-int current_context             = 0; // default context
-int current_context_do          = 0; // keyword: do
-int current_context_newcommand  = 0; // mark for command processing
+int in_c_comment = 0;
 
 QMap<QString,QVariant> MyParameters;
+QMap<QString,bool>     MyVariables;
 
+// forward declarations ...
+int handle_comment();
+int handle_space(int c);
+int handle_dbaseIcomment(int c);
+int handle_Ccomment();
+int handle_newline();
+int handle_assign();
+QVariant handle_ident(int c);
 
 static void inline check_buffer()
 {
-    if (char_pos-1 >= buffer.size())
+    if (char_pos >= buffer.size())
     throw new dBaseError(
     QString("buffer overflow."));
 }
 
 static int get_char()
 {
-    check_buffer();
-    return buffer.at(char_pos++).toLatin1();
+    char c[] = "";
+    if (srcfile->read(c,1) <= 0)
+    throw new dBaseEndOfProgram;
+    return c[0];
 }
-static int process_char(int ch)
-{
-    int cflag = 0;
-    int c = ch;
 
-    if (((c >= 'a') && (c <= 'z'))
-    ||  ((c >= 'A') && (c <= 'Z'))
-    ||   (c == '_')) {
-        ident.append(ch);
-        while (1) {
-            c = get_char();
-            if (((c >= '0') && (c <= '9'))
-            ||  ((c >= 'a') && (c <= 'z'))
-            ||  ((c >= 'A') && (c <= 'Z'))
-            ||   (c == '_')) {
-                ident.append(c);
-                continue;
-            }
-            else {
-                switch (c) {
-                case 10: {
-                    qDebug() << "as: " << ident;
-                    
-                    if (current_context_do == 2)
-                    {   qDebug() << "wuitt";
-                        ident.clear();
-                        while (1) {
-                            c = get_char();
-                            if (((c >= '0') && (c <= '9'))
-                            ||  ((c >= 'a') && (c <= 'z'))
-                            ||  ((c >= 'A') && (c <= 'Z'))
-                            ||   (c == '_') || (c == '.')) {
-                                ident.append(c);
-                                continue;
-                            }
-                            else if (c == 10) {
-                            qDebug() << "for22: " << ident;
-                                throw new dBaseNewLine;
-                                break;
-                            }
-                            else if (c == 32 || c == 9 || c == 7) {
-                                continue;
-                            }
-                            
-                            else if (c == ',') {
-                                qDebug() << "kommas: " << ident;
-                                ident.clear();
-                                continue;
-                            }
-                            
-                            current_context_do = 2;
-                            
-                            if (c == '&') process_char('&'); else
-                            if (c == '*') process_char('*'); else
-                            if (c == '/') process_char('/'); else {
-                                if (char_pos >= buffer.size())
-                                throw new dBaseEndOfProgram;
-                                
-                                else
-                                qDebug() << "1formser: " << ident;
-                                break;
-                            }
-                        }
-                    }
-                    else
-                    throw new dBaseNewLine;
-                }
-                break;
-                
-                case 32:
-                case  7:
-                case  9: {
-                    if (ident.trimmed().size() > 0) {
-                        ident = ident.toLower();
-                        qDebug() << "id: " << ident;
-                        if (ident == "do") {
-                            qDebug() << "ein dooer";
-                            current_context_do = 1;
+static int unget_char()
+{
+    if (srcfile->pos() > 0)
+        srcfile->seek(
+        srcfile->pos()-1);
+    else
+    throw new dBaseError("data position error");
+    return get_char();
+}
+
+QString handle_number(int c)
+{
+    QString number;
+    number.append(c);
+    while (1) {
+        c = get_char();
+        if ((c >= '0') && (c <= '9')) {
+            number.append(c);
+            
+            QString numold = number;
+            QString numsub;
+            
+            while (1) {
+                c = get_char();
+                if (c == ' ' || c == '\t' || c == '\n') {
+                    if (c == '\n')
+                    ++line_no;
+                    while (1) {
+                        c = get_char();
+                        if (c == ' ' || c == '\t' || c == '\n') {
+                            if (c == '\n')
+                            ++line_no;
+                            continue;
+                        }   else
+                        if (c == '*') { qDebug() << "malser1: " << number;
                             while (1) {
                                 c = get_char();
-                                if (((c >= '0') && (c <= '9'))
-                                ||  ((c >= 'a') && (c <= 'z'))
-                                ||  ((c >= 'A') && (c <= 'Z'))
-                                ||   (c == '_')) {
-                                    ident.append(c);
-                                    continue;
-                                }
-                                else if (c == 10) {
-                                    throw new dBaseNewLine;
+                                if (c >= '0' && c <= '9') {
+                                    QString n1 = handle_number(c);
+                                    qDebug() << n1;
                                     break;
-                                }
-                                else if (c == 32 || c == 9 || c == 7) {
-                                    qDebug() << "Aformser: " << ident;
-                                    break;
-                                }
-                                
-                                else if (c == '&') goto and_goto;
-                                else if (c == '*') goto mul_goto;
-                                else if (c == '/') goto div_goto;
-                                
-                                else break;
-                            }
-                            qDebug() << "Bformser: " << ident;
-                        }
-                        ident.clear();
-                    }
-                }
-                break;
-     
-                case ',': {
-
-                    QString s("parameter");
-                    if (ident.contains(s))
-                    {
-                        QString s2 = ident;
-                        s2.resize(s.size());
-                        qDebug() << "para: " << s2;
-                        
-                        ident =
-                        ident.midRef(s.size()).toString();
-                    }
-                    qDebug() << "comma: " << ident;
-                    ident.clear();
-                    c = buffer.at(char_pos++).toLatin1();
-                    if (((c >= 'a') && (c <= 'z'))
-                    ||  ((c >= 'A') && (c <= 'Z'))
-                    ||   (c == '_')) {
-                        ident.append(c);
-                        continue;
-                    }
-                    else if (c == '&') goto and_goto;
-                    else if (c == '*') goto mul_goto;
-                    else if (c == '/') goto div_goto;
-                    
-                    else if (c ==  10) throw new dBaseNewLine;
-                    else if (c ==   9) break;
-                    else if (c ==  32) break;
-                    
-                    else if (c == ',') {
-                        qDebug() << "nochn komma";
-                    }
-                    
-                    else {
-                    throw new dBaseError(QString("PARAMETER syntax error."));
-                    }
-                }
-                break;
-                           
-                case '*': {
-                mul_goto:
-                    c = buffer.at(char_pos).toLatin1();
-                    if (c == '*') {
-                        // dBase comment 1
-                        while (1) {
-                            ++char_pos;
-                            c = buffer.at(char_pos).toLatin1();
-                            if (c == 10)
-                            break;
-                        }
-                    }
-                    else throw new dBaseError(
-                    QString("syntax error => you mean a comment?"));
-                    
-                    return TOKEN_IDENT;
-                }
-                break;
-                
-                case '&': {
-                and_goto:
-                    ch = buffer.at(char_pos).toLatin1();
-                    if (c == '&') {
-                        // dBase comment 1
-                        while (1) {
-                            ++char_pos;
-                            c = buffer.at(char_pos).toLatin1();
-                            if (c == 10)
-                            break;
-                        }
-                    }
-                    else throw new dBaseError(
-                    QString("syntax error => you mean a comment?"));
-                    
-                    return TOKEN_IDENT;
-                }
-                break;
-                
-                case '/': {
-                div_goto:
-                    c = buffer.at(char_pos++).toLatin1();
-                    if (c == '/') {
-                        // c++ comment 1
-                        while (1) {
-                            ++char_pos;
-                            c = buffer.at(char_pos).toLatin1();
-                            if (c == 10)
-                            break;
-                        }
-                    }
-                    else if (c == '*') {
-                        while (1) {
-                            if (char_pos >= buffer.size())
-                            throw new dBaseError("syntax error in comment.");
-        
-                            c = buffer.at(++char_pos).toLatin1();
-                            if (c == '*') {
-                                c = buffer.at(++char_pos).toLatin1();
-                                if (c == '/') {
-                                    cflag = 2;
-                                    break;
-                                }
-                                else {
-                                    continue;
                                 }
                             }
-                            else if (c ==  10) {
-                                char_pos = 0;
-                                char *buff_ = new char[MAX_READ_LINE];
-                                while (!srcfile->atEnd()) {
-                                    srcfile->readLine(buff_,MAX_READ_LINE);
-                                    buffer.clear();
-                                    buffer.append(buff_);
-                                    char_pos = -1;
+                            break;
+                        }
+                    }
+                }   else
+                if (c >= '0' && c <= '9') {
+                    number.append(c);
+                    continue;
+                }   else
+                if (c == '*') { goto malser; } else {
+                    break;
+                }
+            }
+        }   else
+        if (c == '&') {
+            c = get_char();
+            if (c == '&')
+            handle_newline();
+            else return QString("&");
+        }   else
+        if (c == '/') {
+            c = get_char();
+            if (c == '*') {
+                handle_Ccomment();
+                return number;
+            }
+            else if (c == '/') {
+                handle_newline();
+                return number;
+            }
+            return QString("/");
+        }   else
+        if (c == 0) {
+            throw new dBaseEndOfProgram;
+        }   else
+        if (c == ' ' || c == '\t' || c == '\n') {
+            if (c == '\n')
+            ++line_no;
+            
+            while (1) {
+                c = get_char();
+                if (c == ' ' || c == '\t' || c == '\n') {
+                    if (c == '\n')
+                    ++line_no;
+                    continue;
+                }   else
+                if (c == '*') { goto malser; }
+            }
+        }            
+        else if (c == '*') { malser: 
+            qDebug() << "malser2: " << number;
+            while (1) {
+                c = get_char();
+                if (c == ' ' || c == '\t' || c == '\n') {
+                    if (c == '\n')
+                    ++line_no;
+                    continue;
+                }   else
+                if ((c >= 'a' && c <= 'z') || c == '_') {
+                    ident = handle_ident(c).toString();
+                    qDebug() << "alpern: " << ident;
+                    break;
+                }   else
+                if (c >= '0' && c <= '9') {
+                    number.append(c);
+                    qDebug() << "male: " << c << number;
+                    while (1) {
+                        c = get_char();
+                        if (c >= '0' && c <= '9') {
+                            number.append(c);
+                            continue;
+                        }   else
+                        if ((c >= 'a' && c <= 'z') || c == '_') {
+                            ident.clear();
+                            ident.append(c);
+                            handle_ident(c).toString();
+                            qDebug() << "id: " << ident;
+                            
+                            while (1) {
+                                c = get_char();
+                                if (c == ' ' || c == '\t' || c == '\n') {
+                                    if (c == '\n')
                                     ++line_no;
-                                    
-                                    if (buffer.size() > 0) {
-                                        while (1) {
-                                            c = buffer.at(++char_pos).toLatin1();
-                                            if (c == '*') {
-                                                c = buffer.at(++char_pos).toLatin1();
-                                                if (c == 10) {
-                                                    char_pos = 0;
-                                                    break;
-                                                }
-                                                else if (c == '/') {
-                                                    cflag = 2;
-                                                    break;
-                                                }
-                                            }
-                                            else if (c == 10) {
-                                                char_pos = 0;
-                                                cflag = 3;
-                                                break;
-                                            }
+                                    continue;
+                                }   else
+                                if (c == '=') {
+                                    while (1) {
+                                        c = get_char();
+                                        if (c == ' ' || c == '\t' || c == '\n') {
+                                            if (c == '\n')
+                                            ++line_no;
+                                            continue;
+                                        }   else {
+                                            break;
                                         }
-                                        if (cflag == 3)
-                                        continue; else
-                                        break;
                                     }
-                                    else throw new dBaseError(
-                                    QString("can not found comment end"));
-                                    if (cflag == 2)
-                                    break;
                                 }
-                                if (cflag == 2)
                                 break;
                             }
+                            
+                            number.clear();
+                            while (1) {
+                                if (c >= '0' && c <= '9') {
+                                    number.append(c);
+                                    c = get_char();
+                                    continue;
+                                }
+                                else {
+                                    qDebug() << "pret: " << number << c;
+                                    break;
+                                }
+                            }
+                            break;
+                            //goto malser;
+                        }   else
+                        if (c == ' ' || c == '\t' || c == '\n') {
+                            if (c == '\n')
+                            ++line_no;
+                        }   else
+                        if (c == '*') {
+                            qDebug() << "malser dreier: " << number;
+                            goto malser;
+                            break;
                         }
-                        break;
                     }
-                    else if (c >= '0' && c <= '9') {
-                        --char_pos;
-                        return '/';
-                    }
-                    else if (c >= 'a' && c <= 'z') { --char_pos; return '/'; }
-                    else if (c >= 'A' && c <= 'Z') { --char_pos; return '/'; }
-                    
-                    cflag = 0;
-                    return TOKEN_IDENT;
-                }
-                break;
-                
-                default: throw new dBaseError(QString("not handled char."));
-                break;
+                    break;
                 }
             }
         }
     }
+    return number;
+}
 
-    else if (c == '&') goto and_goto;
-    else if (c == '*') goto mul_goto;
-    else if (c == '/') goto div_goto;
-       
+int handle_add_variable(int type, QString name, QVariant valu)
+{
+    MyCommand * my_var = new MyCommand;
+    my_var->op    = ADD_VAR;
+    my_var->type  = type;
+    my_var->name  = name;
+    my_var->value = valu;
+    exec_cmds.append(my_var);
+    
+    return 0;
+}
+
+QVariant handle_ident(int c)
+{
+    QString vname;
+    while (1) {
+        c = get_char();
+        if (((c >= '0') && (c <= '9'))
+        ||  ((c >= 'a') && (c <= 'z'))
+        ||   (c == '_')) {
+            ident.append(c);
+            continue;
+        }   else
+        if (c == '\n' || c == ' '
+        ||  c == '\t' || c == '\f' || c == 0) {
+            if (c == '\n') ++line_no; else
+            if (c == 0) return 0;
+            break;
+        }   else
+        if (c == '*') {
+            c = get_char();
+            if (c == '*') {
+                handle_dbaseIcomment(c);
+                break;
+            }
+            else throw new dBaseError("mul not implemented.");
+        }   else
+        if (c == '&') {
+            c = get_char();
+            if (c == '&') {
+                handle_dbaseIcomment(c);
+                break;
+            }
+            else throw new dBaseError("and not implemented.");
+        }   else
+        if (c == '/') {
+            c = get_char();
+            if (c == '/') {
+                handle_newline();
+                break;
+            }   else
+            if (c == '*') {
+                handle_Ccomment();
+                break;
+            }
+        }   else
+        
+        // assign
+        if (c == '=') {
+            vname = ident;
+            qDebug() << "--> " << vname;
+            c = get_char();
+            
+            // ** comment
+            if (c == '*') {
+                c = get_char();
+                if (c == '*') {
+                    handle_dbaseIcomment(c);
+                    break;
+                }
+                else throw new dBaseError("mul not implemented.");
+            }   else
+            
+            // && comment
+            if (c == '&') {
+                c = get_char();
+                if (c == '&') {
+                    handle_dbaseIcomment(c);
+                    break;
+                }
+                else throw new dBaseError("and not implemented.");
+            }   else
+            
+            // C++ comment
+            if (c == '/') {
+                c = get_char();
+                if (c == '/') {
+                    handle_newline();
+                    break;
+                }   else
+                if (c == '*') {
+                    handle_Ccomment();
+                    break;
+                }
+            }   else
+            if ((c >= '0') && (c <= '9')) {
+                qDebug() << "nup: " << handle_number(c);
+                return TOKEN_NUMBER;
+            }   else
+            if (c == '\n' || c == ' '
+            ||  c == '\t' || c == '\f') {
+                if (c == '\n') ++line_no;
+                continue;
+            }   else
+            if (c == 0)
+            throw new dBaseEndOfProgram;  else
+            throw new dBaseError("and not implemented.");
+        }
+    }
+    return ident;
+}
+
+int handle_newline()
+{
+    int c = 0;
+    while (1) {
+        c = get_char();
+        if (c == '\n') {
+            ++line_no;
+            break;
+        }
+        else if (c == 0)
+        return 0;
+    }   return 0;
+}
+
+int handle_space(int c)
+{
+    if (c == '\n' || c == ' '
+    ||  c == '\t' || c == '\f') {
+        if (c == '\n') ++line_no;
+        return 1;
+    }   return 0;
+}
+
+int handle_dbaseIcomment(int c)
+{
+    if (c == '&' || c == '*')
+    {   while(1)
+        {   c = get_char();
+            if (c == '\n') {
+                ++line_no;
+                break;
+            }   else
+            if (c == 0)
+            return 0;
+        }
+    }   else
+    return handle_space(c);
+    return 0;
+}
+
+int handle_Ccomment()
+{
+    int c = 0;
+    while (1) {
+        c = get_char();
+        if (c == '*') {
+            c = get_char();
+            if (c == '/')
+            return 1;
+        }
+        else if (c == '\n') {
+            ++line_no;
+            continue;
+        }
+        else if (c == 0)
+        return 0;
+    }   return 1;
+}
+
+int handle_assign()
+{
+    int c;
+    while (1) {
+        c = handle_comment();
+        if (c == '-' || c == '+') {
+            if (number_ident.length() <= 1) {
+                number_ident.append(c);
+                continue;
+            }
+        }   else
+        if (c == TOKEN_NUMBER) { return TOKEN_NUMBER; } else
+        if (c == TOKEN_IDENT ) { return TOKEN_IDENT;  } else
+        
+        if (c == '\n' || c == ' '
+        ||  c == '\t' || c == '\f') {
+            if (c == '\n') ++line_no;
+            continue;
+        }   else
+        if (c == 0)
+        throw new dBaseEndOfProgram;
+    }
+    return 1;
+}
+
+int handle_comment()
+{
+    int c = 0;
+    while (1) {
+        c = get_char();
+        
+        // ** comment
+        if (c == '*') {
+            c = get_char();
+            if (c == '*') {
+                handle_newline();
+                continue;
+            }
+        }
+
+        // && comment
+        else if (c == '&') {
+            c = get_char();
+            if (c == '&') {
+                handle_newline();
+                continue;
+            }
+        }
+        
+        // C++ comment
+        if (c == '/') {
+            c = get_char();
+            if (c == '/') {
+                handle_newline();
+                continue;
+            }
+            
+            // C comment
+            else if (c == '*') {
+                handle_Ccomment();
+                continue;
+            }
+            
+            // division number
+            else if ((c >= '0') && (c <= '9')) {
+                handle_number(c);
+                return TOKEN_NUMBER;
+            }
+            else if (c == '=')
+            return TOKEN_DIVASSIGN; else
+            throw new dBaseError("unknow char found.");
+        }
+        
+        // numbers ...
+        else if (c == '-' || c == '+') {
+            if (number_ident.length() <= 1) {
+                number_ident.append(c);
+                c = get_char();
+                if ((c >= '0') && (c <= '9')) {
+                    handle_number(c);
+                }  else
+                if (c == '\n' || c == ' '
+                    ||  c == '&'  || c == '/'  || c == '*'
+                    ||  c == '\t' || c == '\f' || c == 0) {
+                    if (c == '\n') ++line_no; else
+                    if (c == 0) return 0;
+                    continue;
+                }   else
+                    
+                // dBase comment I + II
+                if (c == '&') handle_dbaseIcomment(c); else
+                if (c == '*') handle_dbaseIcomment(c); else 
+                    
+                // C++ comment
+                if (c == '/') {
+                    c = get_char();
+                    if (c == '/')
+                    handle_newline();
+
+                    else if (c == '*') {
+                        handle_Ccomment();
+                    }
+                }   else
+                throw new
+                dBaseError(
+                QString("number format invalid."));
+            }
+            else
+            throw new dBaseError("invalid number format.");
+        }
+        else if ((c >= '0') && (c <= '9')) {
+            QVariant var = handle_number(c).toFloat();
+            qDebug() << "num: " << var;
+            return TOKEN_NUMBER;
+        }
+        else if (((c >= 'a') && (c <= 'z')) || (c == '_')) {
+            ident.clear();
+            ident.append(c);
+            qDebug() << "str: " << handle_ident(c).toString();
+            return TOKEN_IDENT;
+        }
+        else if (c == '=') {
+            return '=';
+        }
+        else if (c == ' ' || c == '\t' || c == '\n') {
+            if (c == '\n')
+            ++line_no;
+            continue;
+        }
+        else return 0;
+    }
     return c;
+}
+
+static void process_char()
+{
+    int c;
+    while (1) {
+        ident.clear();
+        c = handle_comment();
+        if (c == TOKEN_IDENT) {
+            c = handle_comment();
+            if (c == '=') {
+                handle_assign();
+                break;
+                //continue;
+            }   //else
+            //throw new dBaseError("wrong1 character.");
+        }
+        else if (c == 0)
+        throw new dBaseEndOfProgram;  else
+        throw new dBaseError("command invalid form");
+    }
 }
 
 // --------------------------------
@@ -365,130 +617,51 @@ static int process_char(int ch)
 // --------------------------------
 void reset_program()
 {
-    srcfile->close();
-    line_no  = 0;
+    line_no  = 1;
     char_pos = 0;
     
-    current_context = 0;
-    current_context_do = 0;
-    current_context_newcommand = 0;
+    exec_cmds.clear();
     
-    delete buff_;
+    ident       .clear();
+    number_ident.clear();
 }
 
 void MainWindow::on_pushButton_clicked()
 {
-    srcfile = new QFile(QString("%1/test.code")
-    .arg(qApp->applicationDirPath()));
+    srcfile = new QFile(
+    QApplication::applicationDirPath() + "/test.code");
     srcfile->open(QIODevice::ReadOnly | QIODevice::Text);
     srcfile->seek(0);
-    
-    int c;
-    buff_ = new char[MAX_READ_LINE];
+
     try {
-        while (!srcfile->atEnd()) {
-            srcfile->readLine(buff_,MAX_READ_LINE);
-            buffer.clear();
-            buffer.append(buff_);
-            
-            ++line_no;
-            
-            if (buffer.size() > 0) {
-                char_pos = 0;
-                ident.clear();
-                
-                while (1) {
-                try {
-                    if (char_pos >= buffer.size())
-                    break;
-                    
-                    if (current_context_do == 1) {
-                        while (1) {
-                            c = get_char();
-                            if (((c >= '0') && (c <= '9'))
-                            ||  ((c >= 'a') && (c <= 'z'))
-                            ||  ((c >= 'A') && (c <= 'Z'))
-                            ||   (c == '_')) {
-                                ident.append(c);
-                                continue;
-                            }
-                            else if (c == 10) {
-                                current_context_do = 2;
-                                c = get_char( );
-                                process_char(c);
-                                qDebug() << "for22: " << ident;
-                                throw new dBaseNewLine;
-                                break;
-                            }
-                            else if (c == 32 || c == 9 || c == 7) {
-                                current_context_do = 2;
-                                qDebug() << "Dformser: " << ident;
-                                ident.clear();
-                                break;
-                            }
-                            
-                            current_context_do = 2;
-                            
-                            if (c == '&') process_char('&'); else
-                            if (c == '*') process_char('*'); else
-                            if (c == '/') process_char('/'); else {
-                                qDebug() << "Cformser: " << ident;
-                                break;
-                            }
-                        }
-                        //current_context_do = 0;
-                    }
-                    
-                    c = buffer.at(char_pos++).toLatin1();
-                    c = process_char(c);
-                    if (ident.trimmed().size() > 0) {
-                        qDebug() << "Informationa: " << ident;
-                        if (ident == "parameter") {
-                            qDebug() << "parameter token found";
-                        }   ident.clear();
-                    }
-                    else if (c == '/') {
-                        ident.clear();
-                        qDebug() << "ein comment";
-                    }
-                    else if (c == 'e') {
-                        qDebug() << "ein e";
-                    }
-                }
-                catch (dBaseEndOfProgram *e) {
-                    Q_UNUSED(e)
-                    QMessageBox::information(this,"Information",
-                    QString("End of Program.\nParsed lines: %1").arg(line_no));
-                    reset_program();
-                    return;
-                }
-                catch (dBaseNewLine *e) {
-                    Q_UNUSED(e)
-                    qDebug() << "new line: " << line_no;
-                    break;
-                }   }
-            }
-            else {
-                throw new dBaseError(QString("Syntax Error."));
-            }
-        }
-        
+        reset_program ();
+        ident.clear   ();
+        process_char  ();
+        srcfile->close();
+        qDebug() << "ende: " << line_no;
+    }
+    catch (dBaseEndOfProgram *e) {
+        Q_UNUSED(e);
         QMessageBox::information(this,"Information",
-        QString("parsed lines: %1").arg(line_no));
+        QString("End of Program.\nParsed lines: %1").arg(line_no));
+
+        reset_program ();
+        srcfile->close();
+        return;
     }
     catch (dBaseError *e) {
+        srcfile->close();
         QMessageBox::critical(this,tr("Error"),
         QString("%1\n%2")
-            .arg(e->m_message)
-            .arg("\nLine: %1")
-            .arg(line_no));
+        
+        .arg(e->m_message)
+        .arg("\nLine: %1")
+        .arg(line_no));
     }
     catch (...) {
-        QMessageBox::critical(this,tr("Error"),tr("unknown error"));
+        srcfile->close();
+        QMessageBox::critical(this,
+        tr("Error"),
+        tr("unknown error"));
     }
-    
-    // ---------------------
-    // reset for nex run ...
-    // ---------------------
-    reset_program();
 }
