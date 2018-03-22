@@ -28,7 +28,12 @@ SOURCES += \
         mainwindow.cc
 
 HEADERS += \
-        mainwindow.h
+        mainwindow.h \
+    dbasevisitor.h \
+    dbasedownvisitor.h \
+    dbaseaddnumber.h \
+    dbaseassign.h \
+    dbasecomando.h
 
 FORMS += \
         mainwindow.ui

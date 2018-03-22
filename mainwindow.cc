@@ -4,10 +4,16 @@ using namespace std;
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 
+#include "dbasevisitor.h"
+#include "dbaseaddnumber.h"
+#include "dbaseassign.h"
+#include "dbasedownvisitor.h"
+
 #include <QDebug>
 
 #include <QString>
 #include <QFile>
+#include <QStack>
 #include <QByteArray>
 #include <QMessageBox>
 #include <QTranslator>
@@ -47,26 +53,62 @@ class dBaseEndOfComment {public:
       dBaseEndOfComment() {}  };
 
 enum op_enum {
-    NOP,
+    START_OF_PROGRAM = 0,
+    NOP = 1,
     NUMBER_ASSIGN,
     ADD_VAR,
-    ADD_NUMBER,
-    SUB_NUMBER,
-    MUL_NUMBER,
-    DIV_NUMBER
+    ADD_NUMBER = 100,
+    SUB_NUMBER = 101,
+    MUL_NUMBER = 102,
+    DIV_NUMBER = 103,
+    
+    ADD_ASSIGN_VAR_NUMBER = 200,
+    
+    TYPE_NUMBER = 1000
 };
 
-class MyCommand {
-public:
-    MyCommand() {}
-    QString name;
-    int type;
-    op_enum op;
-    QVariant value;
+enum enumMathCommand {
+    ncMUL
+};
+enum enumClassType {
+    ctAssign,
+    ctAssignADD,
+    ctAssignSUB,
+    ctAssignMUL1,
+    ctAssignMUL2,
+    ctAssignDIV
 };
 
 
-QVector<MyCommand*> exec_cmds;
+enum enumStaticType {
+    CHAR,
+    SHORT,
+    INT,
+    LONG,
+    stFLOAT,
+    DOUBLE,
+    ARRAY
+};
+
+void dBaseAssign   ::accept(dBaseVisitor &v) { v.visit(this); }
+void dBaseADDnumber::accept(dBaseVisitor &v) { v.visit(this); }
+
+
+void testAST()
+{
+    dBaseComando * cmds[] =
+    {
+        new dBaseAssign,
+        new dBaseADDnumber
+    };
+    
+    dBaseDownVisitor down;
+    
+    for (int i = 0 ; i < 2; i++) {
+        cmds[i]->accept(down);
+    }
+}
+
 
 QByteArray buffer, ident_before;
 
@@ -83,6 +125,8 @@ const int TOKEN_NUMBER    = 1001;
 const int TOKEN_DIVASSIGN = 1002;
 
 int in_c_comment = 0;
+
+
 
 QMap<QString,QVariant> MyParameters;
 QMap<QString,bool>     MyVariables;
@@ -129,10 +173,6 @@ QString handle_number(int c)
         c = get_char();
         if ((c >= '0') && (c <= '9')) {
             number.append(c);
-            
-            QString numold = number;
-            QString numsub;
-            
             while (1) {
                 c = get_char();
                 if (c == ' ' || c == '\t' || c == '\n') {
@@ -162,7 +202,10 @@ QString handle_number(int c)
                     number.append(c);
                     continue;
                 }   else
-                if (c == '*') { goto malser; } else {
+                if (c == '*') {
+                    number.clear();
+                    goto malser;
+                }   else {
                     break;
                 }
             }
@@ -202,7 +245,7 @@ QString handle_number(int c)
                 if (c == '*') { goto malser; }
             }
         }            
-        else if (c == '*') { malser: 
+        else if (c == '*') { malser:
             qDebug() << "malser2: " << number;
             while (1) {
                 c = get_char();
@@ -217,7 +260,13 @@ QString handle_number(int c)
                     break;
                 }   else
                 if (c >= '0' && c <= '9') {
+                    //expr_class =
+                    //expr_class->addRPNnumber(
+                    //expr_class, MUL_NUMBER, number);
+                    
+                    number.clear(); // <--
                     number.append(c);
+                    
                     qDebug() << "male: " << c << number;
                     while (1) {
                         c = get_char();
@@ -226,6 +275,17 @@ QString handle_number(int c)
                             continue;
                         }   else
                         if ((c >= 'a' && c <= 'z') || c == '_') {
+                        //expr_class =
+                        //expr_class->addRPNnumber(
+                        //expr_class, MUL_NUMBER, number);
+                        
+                        //expr_class =
+                        //expr_class->getCalcResult(
+                        //expr_class, ident);
+                        
+                        
+                            //qDebug() << getCalcResult(ident);
+                            
                             ident.clear();
                             ident.append(c);
                             handle_ident(c).toString();
@@ -274,6 +334,13 @@ QString handle_number(int c)
                         }   else
                         if (c == '*') {
                             qDebug() << "malser dreier: " << number;
+                            //expr_class =
+                            //expr_class->addRPNnumber(
+                            //expr_class, MUL_NUMBER, "*-*");
+                            
+                            //addStackNumber(number);
+                            //addStackOp(MUL_NUMBER);
+                            
                             goto malser;
                             break;
                         }
@@ -286,6 +353,7 @@ QString handle_number(int c)
     return number;
 }
 
+#if 0
 int handle_add_variable(int type, QString name, QVariant valu)
 {
     MyCommand * my_var = new MyCommand;
@@ -297,6 +365,7 @@ int handle_add_variable(int type, QString name, QVariant valu)
     
     return 0;
 }
+#endif
 
 QVariant handle_ident(int c)
 {
@@ -620,14 +689,22 @@ void reset_program()
     line_no  = 1;
     char_pos = 0;
     
-    exec_cmds.clear();
-    
     ident       .clear();
     number_ident.clear();
+    
+    //delete expr_class;
+    //ExprClass  * root_expr = new ExprClass;
+    //expr_class = root_expr->init();
 }
 
 void MainWindow::on_pushButton_clicked()
 {
+    testAST();
+    
+    #if 0
+    return;
+    
+    
     srcfile = new QFile(
     QApplication::applicationDirPath() + "/test.code");
     srcfile->open(QIODevice::ReadOnly | QIODevice::Text);
@@ -664,4 +741,5 @@ void MainWindow::on_pushButton_clicked()
         tr("Error"),
         tr("unknown error"));
     }
+    #endif
 }
