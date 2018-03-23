@@ -93,7 +93,6 @@ enum enumStaticType {
 void dBaseAssign   ::accept(dBaseVisitor &v) { v.visit(this); }
 void dBaseADDnumber::accept(dBaseVisitor &v) { v.visit(this); }
 
-
 void testAST()
 {
     QVector<dBaseComando *> cmds;
@@ -105,18 +104,6 @@ void testAST()
     for (int i = 0 ; i < cmds.count(); i++) {
         cmds.at(i)->accept(down);
     }
-    
-    /*
-    {
-        new dBaseAssign,
-        new dBaseADDnumber
-    };
-    
-    dBaseDownVisitor down;
-    
-    for (int i = 0 ; i < 2; i++) {
-        cmds[i]->accept(down);
-    }*/
 }
 
 
