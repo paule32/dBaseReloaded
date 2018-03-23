@@ -96,7 +96,17 @@ void dBaseADDnumber::accept(dBaseVisitor &v) { v.visit(this); }
 
 void testAST()
 {
-    dBaseComando * cmds[] =
+    QVector<dBaseComando *> cmds;
+    
+    dBaseComando * cmd1 = new dBaseAssign   ; cmds.append(cmd1);
+    dBaseComando * cmd2 = new dBaseADDnumber; cmds.append(cmd2);
+    
+    dBaseDownVisitor down;
+    for (int i = 0 ; i < cmds.count(); i++) {
+        cmds.at(i)->accept(down);
+    }
+    
+    /*
     {
         new dBaseAssign,
         new dBaseADDnumber
@@ -106,7 +116,7 @@ void testAST()
     
     for (int i = 0 ; i < 2; i++) {
         cmds[i]->accept(down);
-    }
+    }*/
 }
 
 
